@@ -1,13 +1,17 @@
 from google import genai
 from google.genai import types
-from search_tool import search_project
+from search_tool import searchTool
+from tool_registry import ToolRegistry
+
 
 client = genai.Client()
+registry = ToolRegistry()
+registry.register(searchTool)
 
-search_tool = types.Tool(
+geminiTool = types.Tool(
     function_declarations=[
         types.FunctionDeclaration(
-            name="search_project",
+            name="searchProject",
             description="Search the HyperCloudAI project files for a keyword.",
             parameters=types.Schema(
                 type="OBJECT",
@@ -23,47 +27,54 @@ search_tool = types.Tool(
     ]
 )
 
-
-def ask_agent(question):
+def askAgent(question):
     response = client.models.generate_content(
         model="gemini-3.5-flash",
         contents=question,
         config=types.GenerateContentConfig(
-            tools=[search_tool]
+            tools=[geminiTool]
         ),
     )
 
     if response.function_calls:
         call = response.function_calls[0]
 
-        if call.name == "search_project":
-            results = search_project(call.args["query"])
+        print("FUNCTION CALL:", call.name)
 
-            final_response = client.models.generate_content(
+        tool = registry.get(call.name)
+
+        print("TOOL FOUND:", tool)
+
+        if tool:
+            results = tool.execute(call.args["query"])
+
+            print("SEARCH RESULTS:", results)
+
+            finalResponse = client.models.generate_content(
                 model="gemini-3.5-flash",
                 contents=f"""
 Question: {question}
 
-The project search tool found these results:
+Search results:
 {results}
 
-Answer the user's question using these results.
-""",
+Answer the question using these search results.
+Do not call any tools. Just give the user the answer.
+"""
             )
 
-            return final_response.text
+            print("FINAL RESPONSE:", finalResponse.text)
+
+            return finalResponse.text
 
     return response.text
-
 
 print("HyperCloudAI Agent")
 print("Type 'exit' to quit.\n")
 
 while True:
     question = input("You: ")
-
     if question.lower() == "exit":
         break
-
-    answer = ask_agent(question)
+    answer = askAgent(question)
     print("AI:", answer)

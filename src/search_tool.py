@@ -1,3 +1,4 @@
+from tool import Tool
 from pathlib import Path
 
 def search_project(query):
@@ -11,3 +12,12 @@ def search_project(query):
             except Exception:
                 pass
     return results
+
+searchTool = Tool(
+    name="searchProject",
+    description="Search the HyperCloudAI project files for a keyword.",
+    inputSchema={
+        "query": "string"
+    },
+    execute=search_project
+)
