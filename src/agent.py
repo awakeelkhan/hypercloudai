@@ -3,7 +3,6 @@ from google.genai import types
 from search_tool import searchTool
 from tool_registry import ToolRegistry
 
-
 client = genai.Client()
 registry = ToolRegistry()
 registry.register(searchTool)
@@ -28,46 +27,32 @@ geminiTool = types.Tool(
 )
 
 def askAgent(question):
-    response = client.models.generate_content(
-        model="gemini-3.5-flash",
-        contents=question,
-        config=types.GenerateContentConfig(
-            tools=[geminiTool]
-        ),
-    )
+    messages = [question]
+    while True:
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=messages,
+            config=types.GenerateContentConfig(
+                tools=[geminiTool]
+            ),
+        )
 
-    if response.function_calls:
-        call = response.function_calls[0]
+        if response.function_calls:
+            call = response.function_calls[0]
+            tool = registry.get(call.name)
 
-        print("FUNCTION CALL:", call.name)
-
-        tool = registry.get(call.name)
-
-        print("TOOL FOUND:", tool)
-
-        if tool:
-            results = tool.execute(call.args["query"])
-
-            print("SEARCH RESULTS:", results)
-
-            finalResponse = client.models.generate_content(
-                model="gemini-3.5-flash",
-                contents=f"""
-Question: {question}
-
-Search results:
-{results}
-
-Answer the question using these search results.
-Do not call any tools. Just give the user the answer.
-"""
+            if tool:
+                results = tool.execute(call.args["query"])
+                messages.append(
+                    f"Tool {call.name} returned: {results}"
+                )
+                continue
+            messages.append(
+                f"The tool '{call.name}' is not available. "
+                "Answer the user's question without using a tool."
             )
-
-            print("FINAL RESPONSE:", finalResponse.text)
-
-            return finalResponse.text
-
-    return response.text
+            continue
+        return response.text
 
 print("HyperCloudAI Agent")
 print("Type 'exit' to quit.\n")
