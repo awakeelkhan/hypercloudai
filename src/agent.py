@@ -2,6 +2,7 @@ from google import genai
 from google.genai import types
 from search_tool import searchTool
 from tool_registry import ToolRegistry
+from thread import Thread
 
 client = genai.Client()
 registry = ToolRegistry()
@@ -26,12 +27,11 @@ geminiTool = types.Tool(
     ]
 )
 
-def askAgent(question):
-    messages = [question]
+def askAgent(thread):
     while True:
         response = client.models.generate_content(
             model="gemini-3.5-flash",
-            contents=messages,
+            contents=thread.getMessages(),
             config=types.GenerateContentConfig(
                 tools=[geminiTool]
             ),
@@ -39,27 +39,30 @@ def askAgent(question):
 
         if response.function_calls:
             call = response.function_calls[0]
+            thread.addToolCall(call)
             tool = registry.get(call.name)
-
             if tool:
                 results = tool.execute(call.args["query"])
-                messages.append(
+                thread.addToolResult(results)
+                thread.addMessage(
                     f"Tool {call.name} returned: {results}"
                 )
                 continue
-            messages.append(
+            thread.addMessage(
                 f"The tool '{call.name}' is not available. "
                 "Answer the user's question without using a tool."
             )
             continue
+        thread.addMessage(response.text)
         return response.text
 
 print("HyperCloudAI Agent")
 print("Type 'exit' to quit.\n")
-
+thread = Thread()
 while True:
     question = input("You: ")
     if question.lower() == "exit":
         break
-    answer = askAgent(question)
+    thread.addMessage(question)
+    answer = askAgent(thread)
     print("AI:", answer)
