@@ -1,12 +1,16 @@
 from google import genai
 from google.genai import types
-from search_tool import searchTool
-from tool_registry import ToolRegistry
+
+from skill_registry import SkillRegistry
+from filesystem_skill import filesystemSkill
 from thread import Thread
 
+
 client = genai.Client()
-registry = ToolRegistry()
-registry.register(searchTool)
+
+skillRegistry = SkillRegistry()
+skillRegistry.register(filesystemSkill)
+
 
 geminiTool = types.Tool(
     function_declarations=[
@@ -27,6 +31,17 @@ geminiTool = types.Tool(
     ]
 )
 
+
+def findTool(toolName):
+    for skill in skillRegistry.getAll():
+        tool = skill.getTool(toolName)
+
+        if tool:
+            return tool
+
+    return None
+
+
 def askAgent(thread):
     while True:
         response = client.models.generate_content(
@@ -39,30 +54,49 @@ def askAgent(thread):
 
         if response.function_calls:
             call = response.function_calls[0]
-            thread.addToolCall(call)
-            tool = registry.get(call.name)
+
+            print("Tool requested:", call.name)
+
+            tool = findTool(call.name)
+
             if tool:
-                results = tool.execute(call.args["query"])
-                thread.addToolResult(results)
+                results = tool.execute(
+                    call.args["query"]
+                )
+
+                print("Tool result:", results)
+
                 thread.addMessage(
+                    "user",
                     f"Tool {call.name} returned: {results}"
                 )
+
                 continue
-            thread.addMessage(
-                f"The tool '{call.name}' is not available. "
-                "Answer the user's question without using a tool."
-            )
-            continue
-        thread.addMessage(response.text)
+
+        thread.addMessage(
+            "model",
+            response.text
+        )
+
         return response.text
+
 
 print("HyperCloudAI Agent")
 print("Type 'exit' to quit.\n")
+
 thread = Thread()
+
 while True:
     question = input("You: ")
+
     if question.lower() == "exit":
         break
-    thread.addMessage(question)
+
+    thread.addMessage(
+        "user",
+        question
+    )
+
     answer = askAgent(thread)
+
     print("AI:", answer)
