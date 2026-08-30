@@ -27,6 +27,14 @@ geminiTool = types.Tool(
                 },
                 required=["query"],
             ),
+        ),
+        types.FunctionDeclaration(
+            name="listDirectory",
+            description="List the files inside the src directory.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={}
+            ),
         )
     ]
 )
@@ -42,8 +50,14 @@ def findTool(toolName):
     return None
 
 
+def log(message):
+    print(f"[LOG] {message}")
+
+
 def askAgent(thread):
     while True:
+        log("Sending request to model")
+
         response = client.models.generate_content(
             model="gemini-3.5-flash",
             contents=thread.getMessages(),
@@ -53,25 +67,33 @@ def askAgent(thread):
         )
 
         if response.function_calls:
-            call = response.function_calls[0]
+            for call in response.function_calls:
 
-            print("Tool requested:", call.name)
+                log(f"Tool requested: {call.name}")
 
-            tool = findTool(call.name)
+                tool = findTool(call.name)
 
-            if tool:
-                results = tool.execute(
-                    call.args["query"]
-                )
+                if not tool:
+                    log(f"Tool not found: {call.name}")
+                    continue
 
-                print("Tool result:", results)
+                if call.name == "searchProject":
+                    results = tool.execute(
+                        call.args["query"]
+                    )
+                else:
+                    results = tool.execute()
+
+                log(f"Tool result: {results}")
 
                 thread.addMessage(
                     "user",
                     f"Tool {call.name} returned: {results}"
                 )
 
-                continue
+            continue
+
+        log("Model returned final response")
 
         thread.addMessage(
             "model",
