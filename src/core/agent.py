@@ -1,30 +1,24 @@
 from src.models.model_adapter import ModelAdapter
 from src.models.groq_adapter import GroqAdapter
-
 from src.skills.skill_registry import SkillRegistry
 from src.skills.filesystem_skill import filesystemSkill
-
 from src.state.thread import Thread
+from src.core.events import AgentEvent
+from src.core.event_stream import EventStream
 from src.config import Config
 
 import json
-
-
 config = Config()
 
 model: ModelAdapter = GroqAdapter(
     apiKey=config.groqApiKey,
     modelName=config.modelName
 )
-
-
 skillRegistry = SkillRegistry()
 
 skillRegistry.register(
     filesystemSkill
 )
-
-
 tools = [
     {
         "type": "function",
@@ -55,8 +49,6 @@ tools = [
         }
     }
 ]
-
-
 def findTool(toolName):
     for skill in skillRegistry.getAll():
 
@@ -68,15 +60,25 @@ def findTool(toolName):
             return tool
 
     return None
-
-
 def log(message):
     print(
         f"[LOG] {message}"
     )
 
 
-def askAgent(thread):
+def emitEvent(eventStream, eventType, data=None):
+    if eventStream:
+        eventStream.emit(
+            AgentEvent(
+                eventType,
+                data
+            )
+        )
+def askAgent(thread, eventStream=None):
+    emitEvent(
+        eventStream,
+        "run_started"
+    )
 
     while True:
 
@@ -84,18 +86,67 @@ def askAgent(thread):
             "Sending request to model"
         )
 
-        response = model.generate(
+        response = model.stream(
             messages=thread.getMessages(),
             tools=tools
         )
 
-        message = response.choices[0].message
+        content = ""
+        toolCalls = {}
 
-        if message.tool_calls:
+        for chunk in response:
+            delta = chunk.choices[0].delta
 
-            for call in message.tool_calls:
+            if delta.content:
+                content += delta.content
 
-                toolName = call.function.name
+                emitEvent(
+                    eventStream,
+                    "token",
+                    {"content": delta.content}
+                )
+
+            if delta.tool_calls:
+                for toolCall in delta.tool_calls:
+                    index = toolCall.index
+
+                    if index not in toolCalls:
+                        toolCalls[index] = {
+                            "id": "",
+                            "type": "function",
+                            "function": {
+                                "name": "",
+                                "arguments": ""
+                            }
+                        }
+
+                    currentCall = toolCalls[index]
+
+                    if toolCall.id:
+                        currentCall["id"] = toolCall.id
+
+                    if toolCall.function:
+
+                        if toolCall.function.name:
+                            currentCall["function"]["name"] += toolCall.function.name
+
+                        if toolCall.function.arguments:
+                            currentCall["function"]["arguments"] += toolCall.function.arguments
+
+        if toolCalls:
+
+            for call in toolCalls.values():
+
+                toolName = call["function"]["name"]
+
+                emitEvent(
+                    eventStream,
+                    "tool_called",
+                    {
+                        "name": toolName,
+                        "arguments": call["function"]["arguments"]
+                    }
+                )
 
                 log(
                     f"Tool requested: {toolName}"
@@ -111,10 +162,19 @@ def askAgent(thread):
                         f"Tool not found: {toolName}"
                     )
 
+                    emitEvent(
+                        eventStream,
+                        "tool_result",
+                        {
+                            "name": toolName,
+                            "result": "Tool not found"
+                        }
+                    )
+
                     continue
 
                 arguments = json.loads(
-                    call.function.arguments
+                    call["function"]["arguments"]
                 )
 
                 if toolName == "searchProject":
@@ -131,23 +191,23 @@ def askAgent(thread):
                     f"Tool result: {results}"
                 )
 
-                toolCall = {
-                    "id": call.id,
-                    "type": "function",
-                    "function": {
+                emitEvent(
+                    eventStream,
+                    "tool_result",
+                    {
                         "name": toolName,
-                        "arguments": call.function.arguments
+                        "result": results
                     }
-                }
+                )
 
                 thread.addToolCall(
-                    toolCall
+                    call
                 )
 
                 thread.addMessage(
                     "assistant",
                     None,
-                    tool_calls=[toolCall]
+                    tool_calls=[call]
                 )
 
                 thread.addToolResult(
@@ -157,7 +217,7 @@ def askAgent(thread):
                 thread.addMessage(
                     "tool",
                     str(results),
-                    tool_call_id=call.id
+                    tool_call_id=call["id"]
                 )
 
             continue
@@ -168,44 +228,50 @@ def askAgent(thread):
 
         thread.addMessage(
             "assistant",
-            message.content
+            content
         )
 
-        return message.content
+        emitEvent(
+            eventStream,
+            "run_completed",
+            {"content": content}
+        )
+
+        return content
 
 
-print(
-    "HyperCloudAI Agent"
-)
-
-print(
-    "Type 'exit' to quit.\n"
-)
-
-
-thread = Thread()
-
-
-while True:
-
-    question = input(
-        "You: "
-    )
-
-    if question.lower() == "exit":
-
-        break
-
-    thread.addMessage(
-        "user",
-        question
-    )
-
-    answer = askAgent(
-        thread
+def runCli():
+    print(
+        "HyperCloudAI Agent"
     )
 
     print(
-        "AI:",
-        answer
+        "Type 'exit' to quit.\n"
     )
+
+    thread = Thread()
+
+    while True:
+
+        question = input(
+            "You: "
+        )
+
+        if question.lower() == "exit":
+            break
+
+        thread.addMessage(
+            "user",
+            question
+        )
+        eventStream = EventStream()
+        answer = askAgent(
+            thread,
+            eventStream
+        )
+        print(
+            "AI:",
+            answer
+        )
+if __name__ == "__main__":
+    runCli()
