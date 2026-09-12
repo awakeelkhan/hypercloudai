@@ -1,19 +1,28 @@
+from src.models.model_adapter import ModelAdapter
 from src.models.groq_adapter import GroqAdapter
+
 from src.skills.skill_registry import SkillRegistry
 from src.skills.filesystem_skill import filesystemSkill
+
 from src.state.thread import Thread
 from src.config import Config
+
 import json
+
 
 config = Config()
 
-client = GroqAdapter(
+model: ModelAdapter = GroqAdapter(
     apiKey=config.groqApiKey,
     modelName=config.modelName
 )
+
+
 skillRegistry = SkillRegistry()
 
-skillRegistry.register(filesystemSkill)
+skillRegistry.register(
+    filesystemSkill
+)
 
 
 tools = [
@@ -50,7 +59,10 @@ tools = [
 
 def findTool(toolName):
     for skill in skillRegistry.getAll():
-        tool = skill.getTool(toolName)
+
+        tool = skill.getTool(
+            toolName
+        )
 
         if tool:
             return tool
@@ -59,15 +71,20 @@ def findTool(toolName):
 
 
 def log(message):
-    print(f"[LOG] {message}")
+    print(
+        f"[LOG] {message}"
+    )
 
 
 def askAgent(thread):
+
     while True:
 
-        log("Sending request to model")
+        log(
+            "Sending request to model"
+        )
 
-        response = client.generate(
+        response = model.generate(
             messages=thread.getMessages(),
             tools=tools
         )
@@ -84,7 +101,9 @@ def askAgent(thread):
                     f"Tool requested: {toolName}"
                 )
 
-                tool = findTool(toolName)
+                tool = findTool(
+                    toolName
+                )
 
                 if not tool:
 
@@ -155,7 +174,9 @@ def askAgent(thread):
         return message.content
 
 
-print("HyperCloudAI Agent")
+print(
+    "HyperCloudAI Agent"
+)
 
 print(
     "Type 'exit' to quit.\n"
@@ -172,6 +193,7 @@ while True:
     )
 
     if question.lower() == "exit":
+
         break
 
     thread.addMessage(

@@ -1,6 +1,8 @@
 from groq import Groq
+from src.models.model_adapter import ModelAdapter
 
-class GroqAdapter:
+class GroqAdapter(ModelAdapter):
+
     def __init__(self, apiKey=None, modelName=None):
         if apiKey:
             self.client = Groq(api_key=apiKey)
