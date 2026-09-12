@@ -1,15 +1,18 @@
-from groq import Groq
-
-from skill_registry import SkillRegistry
-from filesystem_skill import filesystemSkill
-from thread import Thread
-
+from src.models.groq_adapter import GroqAdapter
+from src.skills.skill_registry import SkillRegistry
+from src.skills.filesystem_skill import filesystemSkill
+from src.state.thread import Thread
+from src.config import Config
 import json
 
+config = Config()
 
-client = Groq()
-
+client = GroqAdapter(
+    apiKey=config.groqApiKey,
+    modelName=config.modelName
+)
 skillRegistry = SkillRegistry()
+
 skillRegistry.register(filesystemSkill)
 
 
@@ -61,13 +64,12 @@ def log(message):
 
 def askAgent(thread):
     while True:
+
         log("Sending request to model")
 
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
+        response = client.generate(
             messages=thread.getMessages(),
-            tools=tools,
-            tool_choice="auto"
+            tools=tools
         )
 
         message = response.choices[0].message
@@ -78,12 +80,18 @@ def askAgent(thread):
 
                 toolName = call.function.name
 
-                log(f"Tool requested: {toolName}")
+                log(
+                    f"Tool requested: {toolName}"
+                )
 
                 tool = findTool(toolName)
 
                 if not tool:
-                    log(f"Tool not found: {toolName}")
+
+                    log(
+                        f"Tool not found: {toolName}"
+                    )
+
                     continue
 
                 arguments = json.loads(
@@ -91,13 +99,18 @@ def askAgent(thread):
                 )
 
                 if toolName == "searchProject":
+
                     results = tool.execute(
                         arguments["query"]
                     )
+
                 else:
+
                     results = tool.execute()
 
-                log(f"Tool result: {results}")
+                log(
+                    f"Tool result: {results}"
+                )
 
                 toolCall = {
                     "id": call.id,
@@ -108,7 +121,9 @@ def askAgent(thread):
                     }
                 }
 
-                thread.addToolCall(toolCall)
+                thread.addToolCall(
+                    toolCall
+                )
 
                 thread.addMessage(
                     "assistant",
@@ -116,7 +131,9 @@ def askAgent(thread):
                     tool_calls=[toolCall]
                 )
 
-                thread.addToolResult(results)
+                thread.addToolResult(
+                    results
+                )
 
                 thread.addMessage(
                     "tool",
@@ -126,7 +143,9 @@ def askAgent(thread):
 
             continue
 
-        log("Model returned final response")
+        log(
+            "Model returned final response"
+        )
 
         thread.addMessage(
             "assistant",
@@ -137,12 +156,20 @@ def askAgent(thread):
 
 
 print("HyperCloudAI Agent")
-print("Type 'exit' to quit.\n")
+
+print(
+    "Type 'exit' to quit.\n"
+)
+
 
 thread = Thread()
 
+
 while True:
-    question = input("You: ")
+
+    question = input(
+        "You: "
+    )
 
     if question.lower() == "exit":
         break
@@ -152,6 +179,11 @@ while True:
         question
     )
 
-    answer = askAgent(thread)
+    answer = askAgent(
+        thread
+    )
 
-    print("AI:", answer)
+    print(
+        "AI:",
+        answer
+    )

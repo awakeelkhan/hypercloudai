@@ -1,7 +1,7 @@
-from skill import Skill
+from src.skills.skill import Skill
 
-from search_tool import searchTool
-from list_directory_tool import listDirectoryTool
+from src.tools.search_tool import searchTool
+from src.tools.list_directory_tool import listDirectoryTool
 
 
 filesystemSkill = Skill(
