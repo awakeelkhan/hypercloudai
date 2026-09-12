@@ -1,43 +1,48 @@
-from google import genai
-from google.genai import types
+from groq import Groq
 
 from skill_registry import SkillRegistry
 from filesystem_skill import filesystemSkill
 from thread import Thread
 
+import json
 
-client = genai.Client()
+
+client = Groq()
 
 skillRegistry = SkillRegistry()
 skillRegistry.register(filesystemSkill)
 
 
-geminiTool = types.Tool(
-    function_declarations=[
-        types.FunctionDeclaration(
-            name="searchProject",
-            description="Search the HyperCloudAI project files for a keyword.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={
-                    "query": types.Schema(
-                        type="STRING",
-                        description="The keyword to search for."
-                    )
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "searchProject",
+            "description": "Search the HyperCloudAI project files for a keyword.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The keyword to search for."
+                    }
                 },
-                required=["query"],
-            ),
-        ),
-        types.FunctionDeclaration(
-            name="listDirectory",
-            description="List the files inside the src directory.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={}
-            ),
-        )
-    ]
-)
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "listDirectory",
+            "description": "List the files inside the src directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    }
+]
 
 
 def findTool(toolName):
@@ -58,37 +63,65 @@ def askAgent(thread):
     while True:
         log("Sending request to model")
 
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=thread.getMessages(),
-            config=types.GenerateContentConfig(
-                tools=[geminiTool]
-            ),
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-20b",
+            messages=thread.getMessages(),
+            tools=tools,
+            tool_choice="auto"
         )
 
-        if response.function_calls:
-            for call in response.function_calls:
+        message = response.choices[0].message
 
-                log(f"Tool requested: {call.name}")
+        if message.tool_calls:
 
-                tool = findTool(call.name)
+            for call in message.tool_calls:
+
+                toolName = call.function.name
+
+                log(f"Tool requested: {toolName}")
+
+                tool = findTool(toolName)
 
                 if not tool:
-                    log(f"Tool not found: {call.name}")
+                    log(f"Tool not found: {toolName}")
                     continue
 
-                if call.name == "searchProject":
+                arguments = json.loads(
+                    call.function.arguments
+                )
+
+                if toolName == "searchProject":
                     results = tool.execute(
-                        call.args["query"]
+                        arguments["query"]
                     )
                 else:
                     results = tool.execute()
 
                 log(f"Tool result: {results}")
 
+                toolCall = {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": toolName,
+                        "arguments": call.function.arguments
+                    }
+                }
+
+                thread.addToolCall(toolCall)
+
                 thread.addMessage(
-                    "user",
-                    f"Tool {call.name} returned: {results}"
+                    "assistant",
+                    None,
+                    tool_calls=[toolCall]
+                )
+
+                thread.addToolResult(results)
+
+                thread.addMessage(
+                    "tool",
+                    str(results),
+                    tool_call_id=call.id
                 )
 
             continue
@@ -96,11 +129,11 @@ def askAgent(thread):
         log("Model returned final response")
 
         thread.addMessage(
-            "model",
-            response.text
+            "assistant",
+            message.content
         )
 
-        return response.text
+        return message.content
 
 
 print("HyperCloudAI Agent")
