@@ -1,6 +1,3 @@
-from src.skills.skill import Skill
-
-
 class SkillRegistry:
     def __init__(self):
         self.skills = {}
@@ -12,4 +9,4 @@ class SkillRegistry:
         return self.skills.get(skillName)
 
     def getAll(self):
-        return self.skills.values()
+        return list(self.skills.values())
