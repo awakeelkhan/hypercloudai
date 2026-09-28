@@ -6,19 +6,22 @@ from src.state.thread import Thread
 from src.core.events import AgentEvent
 from src.core.event_stream import EventStream
 from src.config import Config
-
+from src.core.reliability import logError
 import json
-config = Config()
+import concurrent.futures
 
+config = Config()
 model: ModelAdapter = GroqAdapter(
     apiKey=config.groqApiKey,
     modelName=config.modelName
 )
+
 skillRegistry = SkillRegistry()
 
 skillRegistry.register(
     filesystemSkill
 )
+
 tools = [
     {
         "type": "function",
@@ -49,7 +52,10 @@ tools = [
         }
     }
 ]
+
+
 def findTool(toolName):
+
     for skill in skillRegistry.getAll():
 
         tool = skill.getTool(
@@ -60,21 +66,29 @@ def findTool(toolName):
             return tool
 
     return None
+
+
 def log(message):
+
     print(
         f"[LOG] {message}"
     )
 
 
 def emitEvent(eventStream, eventType, data=None):
+
     if eventStream:
+
         eventStream.emit(
             AgentEvent(
                 eventType,
                 data
             )
         )
+
+
 def askAgent(thread, eventStream=None):
+
     emitEvent(
         eventStream,
         "run_started"
@@ -86,31 +100,75 @@ def askAgent(thread, eventStream=None):
             "Sending request to model"
         )
 
-        response = model.stream(
-            messages=thread.getMessages(),
-            tools=tools
-        )
+        try:
+
+            response = model.stream(
+                messages=thread.getMessages(),
+                tools=tools
+            )
+
+        except Exception as e:
+
+            logError(
+                f"Model error: {e}"
+            )
+
+            emitEvent(
+                eventStream,
+                "run_failed",
+                {
+                    "error": str(e)
+                }
+            )
+
+            return None
 
         content = ""
+
         toolCalls = {}
 
         for chunk in response:
-            delta = chunk.choices[0].delta
+
+            try:
+
+                delta = chunk.choices[0].delta
+
+            except Exception as e:
+
+                logError(
+                    f"Malformed model response: {e}"
+                )
+
+                emitEvent(
+                    eventStream,
+                    "run_failed",
+                    {
+                        "error": str(e)
+                    }
+                )
+
+                return None
 
             if delta.content:
+
                 content += delta.content
 
                 emitEvent(
                     eventStream,
                     "token",
-                    {"content": delta.content}
+                    {
+                        "content": delta.content
+                    }
                 )
 
             if delta.tool_calls:
+
                 for toolCall in delta.tool_calls:
+
                     index = toolCall.index
 
                     if index not in toolCalls:
+
                         toolCalls[index] = {
                             "id": "",
                             "type": "function",
@@ -123,14 +181,17 @@ def askAgent(thread, eventStream=None):
                     currentCall = toolCalls[index]
 
                     if toolCall.id:
+
                         currentCall["id"] = toolCall.id
 
                     if toolCall.function:
 
                         if toolCall.function.name:
+
                             currentCall["function"]["name"] += toolCall.function.name
 
                         if toolCall.function.arguments:
+
                             currentCall["function"]["arguments"] += toolCall.function.arguments
 
         if toolCalls:
@@ -173,19 +234,48 @@ def askAgent(thread, eventStream=None):
 
                     continue
 
-                arguments = json.loads(
-                    call["function"]["arguments"]
-                )
+                try:
 
-                if toolName == "searchProject":
-
-                    results = tool.execute(
-                        arguments["query"]
+                    arguments = json.loads(
+                        call["function"]["arguments"]
                     )
 
-                else:
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
 
-                    results = tool.execute()
+                        if toolName == "searchProject":
+
+                            future = executor.submit(
+                                tool.execute,
+                                arguments["query"]
+                            )
+
+                        else:
+
+                            future = executor.submit(
+                                tool.execute
+                            )
+
+                        try:
+
+                            results = future.result(
+                                timeout=10
+                            )
+
+                        except concurrent.futures.TimeoutError:
+
+                            logError(
+                                f"Tool timeout: {toolName}"
+                            )
+
+                            results = "Tool execution timed out"
+
+                except Exception as e:
+
+                    logError(
+                        f"Tool error: {e}"
+                    )
+
+                    results = f"Tool error: {e}"
 
                 log(
                     f"Tool result: {results}"
@@ -234,13 +324,16 @@ def askAgent(thread, eventStream=None):
         emitEvent(
             eventStream,
             "run_completed",
-            {"content": content}
+            {
+                "content": content
+            }
         )
 
         return content
 
 
 def runCli():
+
     print(
         "HyperCloudAI Agent"
     )
@@ -258,20 +351,25 @@ def runCli():
         )
 
         if question.lower() == "exit":
+
             break
 
         thread.addMessage(
             "user",
             question
         )
+
         eventStream = EventStream()
+
         answer = askAgent(
             thread,
             eventStream
         )
+
         print(
             "AI:",
             answer
         )
 if __name__ == "__main__":
+
     runCli()
